@@ -234,7 +234,8 @@ def load_gdp(path):
 # Load dataset
 import os
 script_dir = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = os.path.join(script_dir, "data", "Global GDP Explorer 2025 (World Bank  UN Data).csv")
+DATA_PATH = os.path.join(script_dir, "data", "gdp_2025.csv")
+
 
 with st.spinner('⏳ Memuat dataset GDP...'):
     gdf = load_gdp(DATA_PATH)
