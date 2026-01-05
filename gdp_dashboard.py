@@ -232,7 +232,7 @@ def load_gdp(path: Path):
     return df
 
 # Load dataset
-DATA_PATH = Path(__file__).parent / "Global GDP Explorer 2025 (World Bank  UN Data).csv"
+DATA_PATH = Path(__file__).parent / "data/Global GDP Explorer 2025 (World Bank  UN Data).csv"
 with st.spinner('⏳ Memuat dataset GDP...'):
     gdf = load_gdp(DATA_PATH)
 
