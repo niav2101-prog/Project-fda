@@ -194,8 +194,8 @@ st.markdown("""
 
 # Helper: parse and clean CSV values similar to project loader but simplified
 @st.cache_data(ttl=86400)
-def load_gdp(path: Path):
-    if not path.exists():
+def load_gdp(path):
+    if not os.path.exists(path):
         st.error(f"Dataset tidak ditemukan: {path}")
         return pd.DataFrame()
     df = pd.read_csv(path, sep=",", encoding='utf-8', on_bad_lines='skip')
