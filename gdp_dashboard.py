@@ -22,6 +22,16 @@ try:
 except Exception:
     PYCOUNTRY_AVAILABLE = False
 
+# Machine Learning imports
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.svm import SVR, SVC
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score, accuracy_score, silhouette_score
+import warnings
+warnings.filterwarnings('ignore')
+
 # Page config
 st.set_page_config(page_title="Penjelajah PDB Global", page_icon="🌍", layout="wide", initial_sidebar_state="expanded")
 
@@ -230,6 +240,109 @@ def load_gdp(path):
     df['population_2023'] = df['population_2023'].astype(str).str.replace(',','').apply(lambda s: float(s) if s.replace('.','',1).isdigit() else np.nan)
     df['share_world_numeric'] = df['share_world'].astype(str).str.replace('%','').apply(lambda s: float(s) if s.replace('.','',1).isdigit() else np.nan)
     return df
+
+# ===== MACHINE LEARNING MODELS =====
+
+# 1. Random Forest: Prediksi GDP per Kapita
+@st.cache_data(ttl=86400)
+def train_rf_gdp_per_capita(df):
+    """Random Forest untuk prediksi GDP per Kapita"""
+    model_data = df[['gdp_nominal_numeric', 'population_2023', 'gdp_growth_numeric', 'gdp_per_capita_numeric']].dropna()
+    if len(model_data) < 5:
+        return None, None, None, None
+    
+    X = model_data[['gdp_nominal_numeric', 'population_2023', 'gdp_growth_numeric']]
+    y = model_data['gdp_per_capita_numeric']
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
+    model.fit(X_train, y_train)
+    
+    y_pred = model.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    
+    return model, r2, rmse, (X, y)
+
+# 2. SVM: Klasifikasi Kategori Income
+@st.cache_data(ttl=86400)
+def train_svm_income_classification(df):
+    """SVM untuk klasifikasi negara (High/Medium/Low Income)"""
+    model_data = df[['gdp_per_capita_numeric', 'gdp_growth_numeric', 'population_2023']].dropna()
+    if len(model_data) < 5:
+        return None, None, None, None
+    
+    # Tentukan threshold untuk kategori income
+    q75 = model_data['gdp_per_capita_numeric'].quantile(0.75)
+    q25 = model_data['gdp_per_capita_numeric'].quantile(0.25)
+    
+    categories = []
+    for val in model_data['gdp_per_capita_numeric']:
+        if val >= q75:
+            categories.append(2)  # High
+        elif val >= q25:
+            categories.append(1)  # Medium
+        else:
+            categories.append(0)  # Low
+    
+    X = model_data[['gdp_growth_numeric', 'population_2023']]
+    y = np.array(categories)
+    
+    # Normalize features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+    
+    model = SVC(kernel='rbf', C=1.0, random_state=42)
+    model.fit(X_train, y_train)
+    
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    
+    return model, accuracy, scaler, (X_scaled, y)
+
+# 3. KMeans: Clustering Negara
+@st.cache_data(ttl=86400)
+def train_kmeans_clustering(df, n_clusters=4):
+    """KMeans clustering untuk pengelompokan negara"""
+    model_data = df[['gdp_nominal_numeric', 'gdp_per_capita_numeric', 'gdp_growth_numeric', 'population_2023']].dropna()
+    if len(model_data) < 5:
+        return None, None, None, None
+    
+    # Normalize features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(model_data)
+    
+    model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    clusters = model.fit_predict(X_scaled)
+    
+    silhouette = silhouette_score(X_scaled, clusters)
+    
+    return model, clusters, scaler, silhouette
+
+# 4. Random Forest: Prediksi Pertumbuhan GDP
+@st.cache_data(ttl=86400)
+def train_rf_gdp_growth(df):
+    """Random Forest untuk prediksi pertumbuhan GDP"""
+    model_data = df[['gdp_nominal_numeric', 'gdp_per_capita_numeric', 'population_2023', 'gdp_growth_numeric']].dropna()
+    if len(model_data) < 5:
+        return None, None, None, None
+    
+    X = model_data[['gdp_nominal_numeric', 'gdp_per_capita_numeric', 'population_2023']]
+    y = model_data['gdp_growth_numeric']
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
+    model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
+    model.fit(X_train, y_train)
+    
+    y_pred = model.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    
+    return model, r2, rmse, (X, y)
 
 # Load dataset
 import os
@@ -442,6 +555,241 @@ with col2:
             if missing_on_map:
                 with st.expander(f"ℹ️ {len(missing_on_map)} negara tidak ditampilkan di peta"):
                     st.write(', '.join(missing_on_map))
+
+# ===== MACHINE LEARNING SECTION =====
+st.markdown('---')
+st.markdown("""
+<div class='card'><div class='card-title'>🤖 Analisis Machine Learning</div></div>
+""", unsafe_allow_html=True)
+
+ml_tabs = st.tabs(["🌳 Random Forest: GDP/Kapita", "🎯 SVM: Klasifikasi Income", "📊 Clustering Negara", "📈 RF: Prediksi Pertumbuhan"])
+
+# TAB 1: Random Forest - GDP per Kapita
+with ml_tabs[0]:
+    st.subheader("🌳 Prediksi GDP per Kapita dengan Random Forest")
+    
+    with st.spinner("🔄 Training model Random Forest..."):
+        rf_model, rf_r2, rf_rmse, rf_data = train_rf_gdp_per_capita(gdf)
+    
+    if rf_model:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("R² Score", f"{rf_r2:.3f}", help="Seberapa baik model menjelaskan variansi data (0-1)")
+        with col2:
+            st.metric("RMSE", f"${rf_rmse:,.0f}", help="Root Mean Squared Error - rata-rata error prediksi")
+        with col3:
+            st.metric("Akurasi", f"{rf_r2*100:.1f}%", help="Persentase variansi yang dijelaskan")
+        
+        # Feature importance
+        X, y = rf_data
+        feature_importance = pd.DataFrame({
+            'Fitur': ['GDP Nominal', 'Populasi', 'Pertumbuhan GDP'],
+            'Importance': rf_model.feature_importances_
+        }).sort_values('Importance', ascending=True)
+        
+        fig_importance = px.bar(feature_importance, x='Importance', y='Fitur', orientation='h', color='Importance', color_continuous_scale='Blues')
+        fig_importance.update_layout(height=300, showlegend=False)
+        st.plotly_chart(fig_importance, use_container_width=True)
+        
+        # Prediksi untuk negara yang dipilih
+        st.subheader("🔮 Prediksi untuk Negara Tertentu")
+        pred_countries = st.multiselect("Pilih negara untuk prediksi:", options=gdf['country'].dropna().unique(), default=gdf['country'].dropna().unique()[:5], key="rf_gdp_countries")
+        
+        if pred_countries:
+            pred_df = gdf[gdf['country'].isin(pred_countries)][['country', 'gdp_nominal_numeric', 'population_2023', 'gdp_growth_numeric', 'gdp_per_capita_numeric']].dropna()
+            if not pred_df.empty:
+                X_pred = pred_df[['gdp_nominal_numeric', 'population_2023', 'gdp_growth_numeric']]
+                predictions = rf_model.predict(X_pred)
+                
+                pred_result = pd.DataFrame({
+                    'Negara': pred_df['country'].values,
+                    'Aktual GDP/Kapita': pred_df['gdp_per_capita_numeric'].apply(lambda x: f"${x:,.0f}"),
+                    'Prediksi RF': [f"${x:,.0f}" for x in predictions],
+                    'Error': [f"${abs(a-p):,.0f}" for a, p in zip(pred_df['gdp_per_capita_numeric'].values, predictions)]
+                })
+                st.dataframe(pred_result, use_container_width=True)
+    else:
+        st.warning("⚠️ Data tidak cukup untuk melatih model")
+
+# TAB 2: SVM - Klasifikasi Income
+with ml_tabs[1]:
+    st.subheader("🎯 Klasifikasi Kategori Income dengan SVM")
+    
+    with st.spinner("🔄 Training model SVM..."):
+        svm_model, svm_accuracy, svm_scaler, svm_data = train_svm_income_classification(gdf)
+    
+    if svm_model:
+        st.metric("Akurasi Klasifikasi", f"{svm_accuracy*100:.1f}%", help="Persentase prediksi yang benar")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info("🟢 **High Income**: GDP/kapita tinggi (Top 25%)")
+        with col2:
+            st.info("🟡 **Medium Income**: GDP/kapita menengah (25%-75%)")
+        with col3:
+            st.info("🔴 **Low Income**: GDP/kapita rendah (Bottom 25%)")
+        
+        # Klasifikasi semua negara
+        X_scaled, y = svm_data
+        model_data = gdf[['gdp_per_capita_numeric', 'gdp_growth_numeric', 'population_2023']].dropna()
+        
+        # Tentukan threshold untuk kategori
+        q75 = model_data['gdp_per_capita_numeric'].quantile(0.75)
+        q25 = model_data['gdp_per_capita_numeric'].quantile(0.25)
+        
+        predictions_all = svm_model.predict(X_scaled)
+        
+        income_map = {0: '🔴 Low Income', 1: '🟡 Medium Income', 2: '🟢 High Income'}
+        model_data_copy = model_data.reset_index(drop=True)
+        model_data_copy['Kategori'] = [income_map[p] for p in predictions_all]
+        
+        # Ambil dari gdf original
+        classified = gdf[['country', 'gdp_per_capita_numeric']].dropna()
+        classified_indices = model_data.index
+        classified['Kategori'] = [income_map[p] for p in predictions_all]
+        
+        st.subheader("📊 Hasil Klasifikasi Negara")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            high = (np.array(predictions_all) == 2).sum()
+            st.metric("🟢 High Income", high)
+        with col2:
+            medium = (np.array(predictions_all) == 1).sum()
+            st.metric("🟡 Medium Income", medium)
+        with col3:
+            low = (np.array(predictions_all) == 0).sum()
+            st.metric("🔴 Low Income", low)
+        
+        # Pie chart kategori
+        category_counts = [low, medium, high]
+        fig_pie = px.pie(values=category_counts, names=['Low Income', 'Medium Income', 'High Income'], 
+                        color_discrete_sequence=['#ef4444', '#f59e0b', '#10b981'])
+        fig_pie.update_layout(height=400)
+        st.plotly_chart(fig_pie, use_container_width=True)
+        
+        # Tabel klasifikasi
+        st.subheader("📋 Daftar Negara per Kategori")
+        filter_income = st.selectbox("Filter kategori:", options=['Semua', 'High Income', 'Medium Income', 'Low Income'])
+        
+        # Rebuild classification result properly
+        model_countries = gdf[['country', 'gdp_per_capita_numeric', 'gdp_growth_numeric', 'population_2023']].dropna()
+        X_for_pred = model_countries[['gdp_growth_numeric', 'population_2023']]
+        X_scaled_pred = svm_scaler.transform(X_for_pred)
+        pred_categories = svm_model.predict(X_scaled_pred)
+        
+        model_countries['Kategori'] = [income_map[p] for p in pred_categories]
+        
+        if filter_income != 'Semua':
+            display_countries = model_countries[model_countries['Kategori'].str.contains(filter_income)]
+        else:
+            display_countries = model_countries
+        
+        display_countries_show = display_countries[['country', 'Kategori', 'gdp_per_capita_numeric']].sort_values('gdp_per_capita_numeric', ascending=False)
+        display_countries_show.columns = ['Negara', 'Kategori', 'GDP per Kapita']
+        st.dataframe(display_countries_show, use_container_width=True, hide_index=True)
+    else:
+        st.warning("⚠️ Data tidak cukup untuk melatih model SVM")
+
+# TAB 3: KMeans Clustering
+with ml_tabs[2]:
+    st.subheader("📊 Clustering Negara dengan KMeans")
+    
+    n_clusters_slider = st.slider("Jumlah kluster:", min_value=2, max_value=8, value=4)
+    
+    with st.spinner(f"🔄 Training KMeans dengan {n_clusters_slider} kluster..."):
+        kmeans_model, cluster_labels, kmeans_scaler, silhouette = train_kmeans_clustering(gdf, n_clusters=n_clusters_slider)
+    
+    if kmeans_model:
+        st.metric("Silhouette Score", f"{silhouette:.3f}", help="Seberapa baik pengelompokan (nilai lebih tinggi lebih baik, range: -1 hingga 1)")
+        
+        # Tambahkan cluster labels ke dataframe
+        cluster_df = gdf[['country', 'gdp_nominal_numeric', 'gdp_per_capita_numeric', 'gdp_growth_numeric', 'population_2023']].dropna()
+        cluster_df['Cluster'] = cluster_labels
+        
+        # Visualisasi scatter dengan clustering
+        fig_cluster = px.scatter(cluster_df, x='gdp_per_capita_numeric', y='gdp_nominal_numeric', 
+                                size='population_2023', color='Cluster', hover_name='country',
+                                labels={'gdp_per_capita_numeric': 'GDP per Kapita (USD)', 
+                                       'gdp_nominal_numeric': 'GDP Nominal (USD)'},
+                                color_continuous_scale='Viridis')
+        fig_cluster.update_layout(height=500)
+        st.plotly_chart(fig_cluster, use_container_width=True)
+        
+        # Statistik cluster
+        st.subheader("📈 Statistik Cluster")
+        
+        for i in range(n_clusters_slider):
+            cluster_countries = cluster_df[cluster_df['Cluster'] == i]
+            with st.expander(f"Cluster {i} ({len(cluster_countries)} negara)"):
+                avg_gdp = cluster_countries['gdp_nominal_numeric'].mean()
+                avg_per_capita = cluster_countries['gdp_per_capita_numeric'].mean()
+                avg_growth = cluster_countries['gdp_growth_numeric'].mean()
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Rata-rata GDP", f"${avg_gdp/1e12:.2f}T")
+                with col2:
+                    st.metric("Rata-rata GDP/Kapita", f"${avg_per_capita:,.0f}")
+                with col3:
+                    st.metric("Rata-rata Pertumbuhan", f"{avg_growth:.2f}%")
+                
+                st.write("**Negara dalam cluster ini:**")
+                cluster_list = cluster_countries[['country', 'gdp_nominal_numeric', 'gdp_per_capita_numeric']].sort_values('gdp_nominal_numeric', ascending=False)
+                cluster_list.columns = ['Negara', 'GDP Nominal', 'GDP per Kapita']
+                st.dataframe(cluster_list, use_container_width=True, hide_index=True)
+    else:
+        st.warning("⚠️ Data tidak cukup untuk clustering")
+
+# TAB 4: Random Forest - Prediksi Pertumbuhan GDP
+with ml_tabs[3]:
+    st.subheader("📈 Prediksi Pertumbuhan GDP dengan Random Forest")
+    
+    with st.spinner("🔄 Training model Random Forest (Pertumbuhan)..."):
+        rf_growth_model, rf_growth_r2, rf_growth_rmse, rf_growth_data = train_rf_gdp_growth(gdf)
+    
+    if rf_growth_model:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("R² Score", f"{rf_growth_r2:.3f}", help="Seberapa baik model menjelaskan variansi pertumbuhan")
+        with col2:
+            st.metric("RMSE", f"{rf_growth_rmse:.3f}%", help="Root Mean Squared Error prediksi pertumbuhan")
+        with col3:
+            st.metric("Akurasi", f"{rf_growth_r2*100:.1f}%", help="Persentase variansi yang dijelaskan")
+        
+        # Feature importance
+        X_growth, y_growth = rf_growth_data
+        feature_importance_growth = pd.DataFrame({
+            'Fitur': ['GDP Nominal', 'GDP per Kapita', 'Populasi'],
+            'Importance': rf_growth_model.feature_importances_
+        }).sort_values('Importance', ascending=True)
+        
+        fig_importance_growth = px.bar(feature_importance_growth, x='Importance', y='Fitur', orientation='h', color='Importance', color_continuous_scale='Greens')
+        fig_importance_growth.update_layout(height=300, showlegend=False)
+        st.plotly_chart(fig_importance_growth, use_container_width=True)
+        
+        # Prediksi untuk negara yang dipilih
+        st.subheader("🔮 Prediksi Pertumbuhan untuk Negara Tertentu")
+        pred_countries_growth = st.multiselect("Pilih negara untuk prediksi pertumbuhan:", 
+                                              options=gdf['country'].dropna().unique(), 
+                                              default=gdf['country'].dropna().unique()[:5],
+                                              key="rf_growth_countries")
+        
+        if pred_countries_growth:
+            pred_df_growth = gdf[gdf['country'].isin(pred_countries_growth)][['country', 'gdp_nominal_numeric', 'gdp_per_capita_numeric', 'population_2023', 'gdp_growth_numeric']].dropna()
+            if not pred_df_growth.empty:
+                X_pred_growth = pred_df_growth[['gdp_nominal_numeric', 'gdp_per_capita_numeric', 'population_2023']]
+                predictions_growth = rf_growth_model.predict(X_pred_growth)
+                
+                pred_result_growth = pd.DataFrame({
+                    'Negara': pred_df_growth['country'].values,
+                    'Aktual Pertumbuhan': pred_df_growth['gdp_growth_numeric'].apply(lambda x: f"{x:.2f}%"),
+                    'Prediksi RF': [f"{x:.2f}%" for x in predictions_growth],
+                    'Error': [f"{abs(a-p):.2f}%" for a, p in zip(pred_df_growth['gdp_growth_numeric'].values, predictions_growth)]
+                })
+                st.dataframe(pred_result_growth, use_container_width=True)
+    else:
+        st.warning("⚠️ Data tidak cukup untuk melatih model")
 
 # Tabel data
 st.markdown('---')
